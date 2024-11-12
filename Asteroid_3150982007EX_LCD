@@ -1,0 +1,122 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+const char* ssid = "";
+const char* password = "";
+
+// Initialize the LCD with address 0x27, 16 columns, and 2 rows
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// Variables to store asteroid information
+String asteroidName;
+String closeApproachDate;
+float missDistance;
+float velocity;
+int displayState = 0;  // Flip-flop state for rotating display
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(7, 6);
+  lcd.begin(16, 2);
+  lcd.backlight();
+  lcd.print("Connecting...");
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi");
+  lcd.clear();
+  lcd.print("WiFi Connected!");
+
+  // Fetch asteroid data
+  HTTPClient http;
+  String url = "https://api.nasa.gov/neo/rest/v1/feed?start_date=2024-11-15&end_date=2024-11-16&api_key=";
+  
+  http.begin(url);
+  int httpCode = http.GET();
+
+  if (httpCode == 200) {
+    Serial.println("HTTP request successful!");
+    String payload = http.getString();
+
+    DynamicJsonDocument doc(8192);
+    DeserializationError error = deserializeJson(doc, payload);
+
+    if (!error) {
+      JsonArray neos = doc["near_earth_objects"]["2024-11-15"];
+      JsonObject firstNeo = neos[0];  // Fetching the first asteroid
+
+      asteroidName = firstNeo["name"].as<String>();
+      closeApproachDate = firstNeo["close_approach_data"][0]["close_approach_date"].as<String>();
+      missDistance = firstNeo["close_approach_data"][0]["miss_distance"]["kilometers"].as<float>();
+      velocity = firstNeo["close_approach_data"][0]["relative_velocity"]["kilometers_per_hour"].as<float>();
+
+      Serial.println("Asteroid Data Retrieved:");
+      Serial.println("Name: " + asteroidName);
+      Serial.println("Close Approach Date: " + closeApproachDate);
+      Serial.print("Miss Distance (km): ");
+      Serial.println(missDistance);
+      Serial.print("Velocity (km/h): ");
+      Serial.println(velocity);
+    } else {
+      Serial.print("JSON parsing failed: ");
+      Serial.println(error.c_str());
+      lcd.clear();
+      lcd.print("JSON parse error");
+    }
+  } else {
+    Serial.printf("HTTP Response code: %d\n", httpCode);
+    lcd.clear();
+    lcd.print("HTTP Error");
+  }
+  
+  http.end();
+}
+
+void loop() {
+  // Rotate display every 3 seconds
+  switch(displayState) {
+    case 0:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Asteroid:");
+      lcd.setCursor(0, 1);
+      lcd.print(asteroidName);
+      displayState = 1;
+      break;
+
+    case 1:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Miss Dist (km):");
+      lcd.setCursor(0, 1);
+      lcd.print(missDistance);
+      displayState = 2;
+      break;
+
+    case 2:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Approach Date:");
+      lcd.setCursor(0, 1);
+      lcd.print(closeApproachDate);
+      displayState = 3;
+      break;
+
+    case 3:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Velocity (km/h):");
+      lcd.setCursor(0, 1);
+      lcd.print(velocity);
+      displayState = 0;
+      break;
+  }
+  
+  delay(3000);  // Delay before rotating to next state
+}
